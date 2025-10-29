@@ -149,13 +149,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           resettedTasks++;
         }
 
-        // If markAllOnTime is true, confirm all pending tasks
+        // If markAllOnTime is true, confirm only PAST tasks (not all pending)
         if (validation.data.markAllOnTime && task.status === "pending") {
-          await storage.updateTask(task.id, {
-            status: "confirmed",
-            confirmedAt: new Date(),
-          });
-          confirmedTasks++;
+          // Controlla se il task è nel passato
+          const now = new Date();
+          const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+          
+          // Converte orari in minuti per confronto
+          const [taskEndH, taskEndM] = task.endTime.split(":").map(Number);
+          const [currentH, currentM] = currentTime.split(":").map(Number);
+          
+          const taskEndMinutes = taskEndH * 60 + taskEndM;
+          const currentMinutes = currentH * 60 + currentM;
+          
+          // Conferma solo se il task è già finito (nel passato)
+          if (currentMinutes > taskEndMinutes) {
+            await storage.updateTask(task.id, {
+              status: "confirmed",
+              confirmedAt: new Date(),
+            });
+            confirmedTasks++;
+          }
         }
       }
 
@@ -165,6 +179,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "Delays reset successfully",
         resettedTasks,
         confirmedTasks,
+        confirmedTasksNote: "Only past tasks were confirmed",
         scheduleRegenerated: false,
       });
     } catch (error) {

@@ -29,17 +29,61 @@ export default function Dashboard() {
   const currentTask = schedule?.tasks.find((task) => {
     const now = new Date();
     const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-    return currentTime >= task.startTime && currentTime <= task.endTime && task.status === "pending";
+    
+    // Convert time strings to minutes for better comparison
+    const timeToMinutes = (timeStr: string) => {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+    
+    const currentMinutes = timeToMinutes(currentTime);
+    const startMinutes = timeToMinutes(task.startTime);
+    const endMinutes = timeToMinutes(task.endTime);
+    
+    const isInTimeRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+    const isPending = task.status === "pending";
+    
+    console.log("🕐 Controllo task:", {
+      id: task.id,
+      description: task.description,
+      startTime: task.startTime,
+      endTime: task.endTime,
+      status: task.status,
+      currentTime,
+      currentMinutes,
+      startMinutes,
+      endMinutes,
+      isInTimeRange,
+      isPending,
+      isCurrentTask: isInTimeRange && isPending
+    });
+    
+    return isInTimeRange && isPending;
   }) || null;
+
+  console.log("📋 Current task trovato:", currentTask);
 
   // Confirm task mutation
   const confirmMutation = useMutation({
     mutationFn: async (taskId: string) => {
-      const res = await apiRequest("POST", `/api/tasks/${taskId}/confirm`, {
-        taskId: taskId,
-        confirmedAt: new Date().toISOString(),
-      });
-      return res.json();
+      console.log("🔄 Tentativo di conferma task:", taskId);
+      try {
+        const payload = {
+          taskId: taskId,
+          confirmedAt: new Date().toISOString(),
+        };
+        console.log("📤 Payload inviato:", payload);
+        
+        const res = await apiRequest("POST", `/api/tasks/${taskId}/confirm`, payload);
+        console.log("✅ Response ricevuta, status:", res.status);
+        
+        const result = await res.json();
+        console.log("📥 Result JSON:", result);
+        return result;
+      } catch (error) {
+        console.error("❌ Errore nella mutation:", error);
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/schedule/today"] });
@@ -58,6 +102,11 @@ export default function Dashboard() {
   });
 
   const handleConfirm = (taskId: string) => {
+    console.log("🎯 handleConfirm chiamato con taskId:", taskId);
+    if (!taskId) {
+      console.error("❌ TaskId non valido:", taskId);
+      return;
+    }
     confirmMutation.mutate(taskId);
   };
 

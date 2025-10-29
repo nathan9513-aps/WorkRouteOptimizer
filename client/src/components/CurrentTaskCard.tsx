@@ -33,6 +33,14 @@ export function CurrentTaskCard({ task, onConfirm, onReportDelay, isConfirming, 
   const isTravel = task.type === "travel";
   const canConfirm = task.status === "pending" && !isConfirming;
 
+  console.log("🔘 CurrentTaskCard debug:", {
+    taskId: task.id,
+    taskStatus: task.status,
+    isConfirming,
+    canConfirm,
+    onConfirmExists: !!onConfirm
+  });
+
   return (
     <Card className="p-8 rounded-2xl" data-testid="card-current-task">
       <div className="flex flex-col gap-6">

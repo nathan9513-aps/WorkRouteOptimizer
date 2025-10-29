@@ -6,6 +6,7 @@ import { CurrentTaskCard } from "@/components/CurrentTaskCard";
 import { Timeline } from "@/components/Timeline";
 import { QuickStatsPanel } from "@/components/QuickStatsPanel";
 import { DelayWarningPanel } from "@/components/DelayWarningPanel";
+import { ResetDelayDialog } from "@/components/ResetDelayDialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Bell, User } from "lucide-react";
@@ -240,6 +241,38 @@ export default function Dashboard() {
     delayMutation.mutate({ taskId, minutes });
   };
 
+  // Reset delays mutation
+  const resetDelayMutation = useMutation({
+    mutationFn: async (data: { password: string; markAllOnTime: boolean }) => {
+      const res = await apiRequest("POST", "/api/admin/reset-delays", data);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/schedule/today"] });
+      // Reset processed delayed tasks
+      setProcessedDelayedTasks(new Set());
+      // Clear delay warning
+      setDelayWarning(null);
+      
+      toast({
+        title: "✅ Reset Completato",
+        description: `${data.resettedTasks} ritardi rimossi${data.confirmedTasks > 0 ? `, ${data.confirmedTasks} task confermati in orario` : ''}${data.scheduleRegenerated ? '. Programma rigenerato.' : '.'}`,
+      });
+    },
+    onError: (error: any) => {
+      console.error("Errore nel reset:", error);
+      toast({
+        title: "❌ Errore Reset",
+        description: "Password non valida o errore durante il reset dei ritardi.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleResetDelays = async (password: string, markAllOnTime: boolean) => {
+    await resetDelayMutation.mutateAsync({ password, markAllOnTime });
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -263,6 +296,13 @@ export default function Dashboard() {
           <LiveClock />
 
           <div className="flex items-center gap-3">
+            {/* Show reset button only if there are delayed tasks or delays detected */}
+            {(schedule?.tasks.some(task => task.status === "delayed") || delayWarning) && (
+              <ResetDelayDialog
+                onReset={handleResetDelays}
+                isResetting={resetDelayMutation.isPending}
+              />
+            )}
             <Button variant="ghost" size="icon" data-testid="button-notifications">
               <Bell className="w-5 h-5" />
             </Button>

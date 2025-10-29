@@ -80,3 +80,10 @@ export const reportDelaySchema = z.object({
 });
 
 export type ReportDelayRequest = z.infer<typeof reportDelaySchema>;
+
+export const resetDelaySchema = z.object({
+  password: z.string().min(1),
+  markAllOnTime: z.boolean().optional().default(false),
+});
+
+export type ResetDelayRequest = z.infer<typeof resetDelaySchema>;

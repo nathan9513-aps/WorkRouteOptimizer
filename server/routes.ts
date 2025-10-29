@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { generateDailySchedule } from "./scheduleGenerator";
-import { confirmTaskSchema, reportDelaySchema } from "@shared/schema";
+import { confirmTaskSchema, reportDelaySchema, resetDelaySchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Get today's schedule (or generate if doesn't exist)
@@ -134,6 +134,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("Error reporting delay:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Reset delays (admin only)
+  app.post("/api/admin/reset-delays", async (req, res) => {
+    try {
+      // Validate request body
+      const validation = resetDelaySchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ error: "Invalid request body", details: validation.error });
+      }
+
+      // Check admin password (in production, use proper authentication)
+      const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+      if (validation.data.password !== ADMIN_PASSWORD) {
+        return res.status(401).json({ error: "Invalid admin password" });
+      }
+
+      const today = new Date().toISOString().split("T")[0];
+      const schedule = await storage.getScheduleByDateWithTasks(today);
+      
+      if (!schedule) {
+        return res.status(404).json({ error: "No schedule found for today" });
+      }
+
+      let resettedTasks = 0;
+      let confirmedTasks = 0;
+
+      // Reset all delayed tasks back to their original times and status
+      for (const task of schedule.tasks) {
+        if (task.status === "delayed") {
+          // For this demo, we'll reset to pending status
+          // In a real system, you'd restore original times from backup
+          await storage.updateTask(task.id, {
+            status: "pending",
+          });
+          resettedTasks++;
+        }
+
+        // If markAllOnTime is true, confirm all pending tasks
+        if (validation.data.markAllOnTime && task.status === "pending") {
+          await storage.updateTask(task.id, {
+            status: "confirmed",
+            confirmedAt: new Date(),
+          });
+          confirmedTasks++;
+        }
+      }
+
+      // Regenerate the schedule to reset all times to original
+      if (resettedTasks > 0) {
+        // Delete current schedule and regenerate
+        await storage.deleteSchedule(schedule.id);
+        await generateDailySchedule(today, "Nathan");
+      }
+
+      return res.json({
+        message: "Delays reset successfully",
+        resettedTasks,
+        confirmedTasks,
+        scheduleRegenerated: resettedTasks > 0,
+      });
+    } catch (error) {
+      console.error("Error resetting delays:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   });

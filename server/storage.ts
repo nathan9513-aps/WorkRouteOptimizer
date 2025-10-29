@@ -33,6 +33,7 @@ export interface IStorage {
   getSchedule(id: string): Promise<Schedule | undefined>;
   getScheduleByDate(date: string): Promise<Schedule | undefined>;
   createSchedule(schedule: InsertSchedule): Promise<Schedule>;
+  deleteSchedule(id: string): Promise<boolean>;
   
   // Combined queries
   getScheduleWithTasks(scheduleId: string): Promise<ScheduleWithTasks | undefined>;
@@ -210,6 +211,20 @@ export class MemStorage implements IStorage {
     const schedule = await this.getScheduleByDate(date);
     if (!schedule) return undefined;
     return this.getScheduleWithTasks(schedule.id);
+  }
+
+  async deleteSchedule(id: string): Promise<boolean> {
+    const existed = this.schedules.has(id);
+    if (existed) {
+      // Delete all tasks associated with this schedule
+      const tasks = await this.getTasksForSchedule(id);
+      for (const task of tasks) {
+        this.tasks.delete(task.id);
+      }
+      // Delete the schedule
+      this.schedules.delete(id);
+    }
+    return existed;
   }
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { LiveClock } from "@/components/LiveClock";
@@ -18,6 +18,7 @@ export default function Dashboard() {
     delayMinutes: number;
     affectedTasks: number;
   } | null>(null);
+  const [processedDelayedTasks, setProcessedDelayedTasks] = useState<Set<string>>(new Set());
 
   // Fetch today's schedule
   const { data: schedule, isLoading } = useQuery<ScheduleWithTasks>({
@@ -25,16 +26,106 @@ export default function Dashboard() {
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
+  // Helper function to convert time string to minutes
+  const timeToMinutes = useCallback((timeStr: string) => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    return hours * 60 + minutes;
+  }, []);
+
+  // Helper function to calculate delay in minutes
+  const calculateDelayMinutes = useCallback((endTime: string) => {
+    const now = new Date();
+    const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    const currentMinutes = timeToMinutes(currentTime);
+    const endMinutes = timeToMinutes(endTime);
+    return Math.max(0, currentMinutes - endMinutes);
+  }, [timeToMinutes]);
+
+  // Auto-report delay function
+  const handleAutoReportDelay = useCallback(async (taskId: string, delayMinutes: number, taskDescription?: string) => {
+    try {
+      console.log("🤖 Registrazione automatica ritardo:", { taskId, delayMinutes, taskDescription });
+      
+      const res = await apiRequest("POST", `/api/tasks/${taskId}/delay`, {
+        taskId,
+        delayMinutes,
+      });
+      
+      const data = await res.json();
+      
+      // Aggiorna i dati
+      queryClient.invalidateQueries({ queryKey: ["/api/schedule/today"] });
+      
+      setDelayWarning({
+        delayMinutes: data.delayMinutes || delayMinutes,
+        affectedTasks: data.affectedTasks || 0,
+      });
+
+      toast({
+        title: "🤖 Ritardo Rilevato Automaticamente",
+        description: `Task "${taskDescription || 'Task'}" in ritardo di ${delayMinutes} minuti. Programma ricalcolato automaticamente.`,
+        variant: "destructive",
+      });
+    } catch (error) {
+      console.error("❌ Errore nella registrazione automatica del ritardo:", error);
+    }
+  }, [toast]);
+
+  // Auto-delay detection effect
+  useEffect(() => {
+    if (!schedule?.tasks) return;
+
+    // Reset processed tasks when schedule changes (new day, etc.)
+    const currentTaskIds = new Set(schedule.tasks.map(task => task.id));
+    setProcessedDelayedTasks(prev => {
+      const filtered = new Set([...prev].filter(id => currentTaskIds.has(id)));
+      return filtered;
+    });
+
+    const checkDelayedTasks = () => {
+      const now = new Date();
+      const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+      const currentMinutes = timeToMinutes(currentTime);
+
+      schedule.tasks.forEach(task => {
+        if (task.status === "pending" && !processedDelayedTasks.has(task.id)) {
+          const endMinutes = timeToMinutes(task.endTime);
+          
+          // Se il task è scaduto (tempo corrente > tempo fine del task)
+          if (currentMinutes > endMinutes) {
+            const delayMinutes = calculateDelayMinutes(task.endTime);
+            
+            console.log("⏰ Task scaduto rilevato:", {
+              taskId: task.id,
+              description: task.description,
+              endTime: task.endTime,
+              currentTime,
+              delayMinutes
+            });
+
+            // Registra automaticamente il ritardo
+            handleAutoReportDelay(task.id, delayMinutes, task.description);
+            
+            // Marca il task come processato per evitare duplicati
+            setProcessedDelayedTasks(prev => new Set(prev).add(task.id));
+          }
+        }
+      });
+    };
+
+    // Controlla immediatamente
+    checkDelayedTasks();
+
+    // Imposta un timer per controllare ogni minuto
+    const interval = setInterval(checkDelayedTasks, 60000); // 60 secondi
+
+    return () => clearInterval(interval);
+  }, [schedule?.tasks, processedDelayedTasks, timeToMinutes, calculateDelayMinutes, handleAutoReportDelay]);
+
   // Find current task (based on current time)
   const currentTask = schedule?.tasks.find((task) => {
     const now = new Date();
     const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
-    
-    // Convert time strings to minutes for better comparison
-    const timeToMinutes = (timeStr: string) => {
-      const [hours, minutes] = timeStr.split(':').map(Number);
-      return hours * 60 + minutes;
-    };
     
     const currentMinutes = timeToMinutes(currentTime);
     const startMinutes = timeToMinutes(task.startTime);
@@ -42,6 +133,10 @@ export default function Dashboard() {
     
     const isInTimeRange = currentMinutes >= startMinutes && currentMinutes <= endMinutes;
     const isPending = task.status === "pending";
+    
+    // Calcola se il task è in ritardo
+    const isDelayed = currentMinutes > endMinutes && task.status === "pending";
+    const delayMinutes = isDelayed ? calculateDelayMinutes(task.endTime) : 0;
     
     console.log("🕐 Controllo task:", {
       id: task.id,
@@ -55,6 +150,8 @@ export default function Dashboard() {
       endMinutes,
       isInTimeRange,
       isPending,
+      isDelayed,
+      delayMinutes,
       isCurrentTask: isInTimeRange && isPending
     });
     

@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { MapPin, Navigation, CheckCircle } from "lucide-react";
+import { MapPin, Navigation, CheckCircle, Clock, AlertTriangle } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { CountdownTimer } from "./CountdownTimer";
 import { ReportDelayDialog } from "./ReportDelayDialog";
@@ -9,12 +9,26 @@ import type { TaskWithLocation } from "@shared/schema";
 interface CurrentTaskCardProps {
   task: TaskWithLocation | null;
   onConfirm?: (taskId: string) => void;
+  onConfirmWithDelay?: (taskId: string, delayMinutes: number) => void;
   onReportDelay?: (taskId: string, minutes: number) => void;
   isConfirming?: boolean;
+  isConfirmingWithDelay?: boolean;
   isReportingDelay?: boolean;
+  isLate?: boolean;
+  delayMinutes?: number;
 }
 
-export function CurrentTaskCard({ task, onConfirm, onReportDelay, isConfirming, isReportingDelay }: CurrentTaskCardProps) {
+export function CurrentTaskCard({ 
+  task, 
+  onConfirm, 
+  onConfirmWithDelay,
+  onReportDelay, 
+  isConfirming, 
+  isConfirmingWithDelay,
+  isReportingDelay,
+  isLate = false,
+  delayMinutes = 0
+}: CurrentTaskCardProps) {
   if (!task) {
     return (
       <Card className="p-8 rounded-2xl" data-testid="card-current-task-empty">
@@ -31,14 +45,18 @@ export function CurrentTaskCard({ task, onConfirm, onReportDelay, isConfirming, 
 
   const isBreak = task.type === "break";
   const isTravel = task.type === "travel";
-  const canConfirm = task.status === "pending" && !isConfirming;
+  const canConfirm = task.status === "pending" && !isConfirming && !isConfirmingWithDelay;
 
   console.log("🔘 CurrentTaskCard debug:", {
     taskId: task.id,
     taskStatus: task.status,
     isConfirming,
+    isConfirmingWithDelay,
     canConfirm,
-    onConfirmExists: !!onConfirm
+    onConfirmExists: !!onConfirm,
+    onConfirmWithDelayExists: !!onConfirmWithDelay,
+    isLate,
+    delayMinutes
   });
 
   return (
@@ -76,29 +94,67 @@ export function CurrentTaskCard({ task, onConfirm, onReportDelay, isConfirming, 
           <span className="font-semibold">{task.startTime}</span>
           <span className="text-muted-foreground">→</span>
           <span className="font-semibold">{task.endTime}</span>
+          {isLate && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-destructive/10 text-destructive rounded-md text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              <span>In ritardo di {delayMinutes} min</span>
+            </div>
+          )}
         </div>
 
-        {/* Countdown Timer */}
-        {task.status === "pending" && (
+        {/* Countdown Timer or Late Notice */}
+        {task.status === "pending" && !isLate && (
           <div className="border-t pt-6">
             <CountdownTimer targetTime={task.endTime} label="Tempo rimanente per questo task" />
+          </div>
+        )}
+        
+        {isLate && (
+          <div className="border-t pt-6">
+            <div className="flex items-center gap-3 p-4 bg-destructive/5 border border-destructive/20 rounded-lg">
+              <AlertTriangle className="w-6 h-6 text-destructive flex-shrink-0" />
+              <div>
+                <h4 className="font-semibold text-destructive">Task in Ritardo</h4>
+                <p className="text-sm text-muted-foreground">
+                  Sei in ritardo di {delayMinutes} minuti. Puoi proseguire confermando il ritardo.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
         {/* Action Buttons */}
         {canConfirm && (
           <div className="flex gap-3 flex-wrap">
-            <Button
-              size="lg"
-              onClick={() => onConfirm?.(task.id)}
-              disabled={isConfirming}
-              className="flex-1 min-h-12 text-lg"
-              data-testid="button-confirm-task"
-            >
-              <CheckCircle className="w-5 h-5 mr-2" />
-              {isConfirming ? "Conferma in corso..." : "Conferma Arrivo"}
-            </Button>
-            {onReportDelay && (
+            {!isLate ? (
+              // Normal confirmation button
+              <Button
+                size="lg"
+                onClick={() => onConfirm?.(task.id)}
+                disabled={isConfirming}
+                className="flex-1 min-h-12 text-lg"
+                data-testid="button-confirm-task"
+              >
+                <CheckCircle className="w-5 h-5 mr-2" />
+                {isConfirming ? "Conferma in corso..." : "Conferma Arrivo"}
+              </Button>
+            ) : (
+              // Late confirmation button
+              <Button
+                size="lg"
+                variant="destructive"
+                onClick={() => onConfirmWithDelay?.(task.id, delayMinutes)}
+                disabled={isConfirmingWithDelay}
+                className="flex-1 min-h-12 text-lg"
+                data-testid="button-confirm-late-task"
+              >
+                <Clock className="w-5 h-5 mr-2" />
+                {isConfirmingWithDelay ? "Confermando ritardo..." : `Conferma con ${delayMinutes} min di Ritardo`}
+              </Button>
+            )}
+            
+            {/* Keep the report delay dialog for manual reporting */}
+            {onReportDelay && !isLate && (
               <ReportDelayDialog
                 onReportDelay={(minutes) => onReportDelay(task.id, minutes)}
                 isReporting={isReportingDelay}

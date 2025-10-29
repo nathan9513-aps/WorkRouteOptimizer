@@ -96,19 +96,35 @@ export default function Dashboard() {
           if (currentMinutes > endMinutes) {
             const delayMinutes = calculateDelayMinutes(task.endTime);
             
-            console.log("⏰ Task scaduto rilevato:", {
-              taskId: task.id,
-              description: task.description,
-              endTime: task.endTime,
-              currentTime,
-              delayMinutes
-            });
-
-            // Registra automaticamente il ritardo
-            handleAutoReportDelay(task.id, delayMinutes, task.description);
+            // Solo auto-processo se il task è scaduto da più di 5 minuti
+            // Questo dà all'utente tempo per confermare manualmente con ritardo
+            const autoProcessThreshold = 5; // minuti
             
-            // Marca il task come processato per evitare duplicati
-            setProcessedDelayedTasks(prev => new Set(prev).add(task.id));
+            if (delayMinutes >= autoProcessThreshold) {
+              console.log("⏰ Task scaduto rilevato (auto-processo):", {
+                taskId: task.id,
+                description: task.description,
+                endTime: task.endTime,
+                currentTime,
+                delayMinutes,
+                autoProcessed: true
+              });
+
+              // Registra automaticamente il ritardo
+              handleAutoReportDelay(task.id, delayMinutes, task.description);
+              
+              // Marca il task come processato per evitare duplicati
+              setProcessedDelayedTasks(prev => new Set(prev).add(task.id));
+            } else {
+              console.log("⏰ Task in ritardo (attesa conferma manuale):", {
+                taskId: task.id,
+                description: task.description,
+                endTime: task.endTime,
+                currentTime,
+                delayMinutes,
+                waitingForManualConfirm: true
+              });
+            }
           }
         }
       });
@@ -123,7 +139,7 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [schedule?.tasks, processedDelayedTasks, timeToMinutes, calculateDelayMinutes, handleAutoReportDelay]);
 
-  // Find current task (based on current time)
+  // Find current task (based on current time) - include late tasks
   const currentTask = schedule?.tasks.find((task) => {
     const now = new Date();
     const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
@@ -136,8 +152,13 @@ export default function Dashboard() {
     const isPending = task.status === "pending";
     
     // Calcola se il task è in ritardo
-    const isDelayed = currentMinutes > endMinutes && task.status === "pending";
-    const delayMinutes = isDelayed ? calculateDelayMinutes(task.endTime) : 0;
+    const isLate = currentMinutes > endMinutes && task.status === "pending";
+    const delayMinutes = isLate ? calculateDelayMinutes(task.endTime) : 0;
+    
+    // Il task è "corrente" se:
+    // 1. È nel suo orario normale E è pending
+    // 2. È in ritardo E è ancora pending (non ancora auto-processato)
+    const isCurrent = (isInTimeRange && isPending) || (isLate && isPending);
     
     console.log("🕐 Controllo task:", {
       id: task.id,
@@ -151,15 +172,32 @@ export default function Dashboard() {
       endMinutes,
       isInTimeRange,
       isPending,
-      isDelayed,
+      isLate,
       delayMinutes,
-      isCurrentTask: isInTimeRange && isPending
+      isCurrent
     });
     
-    return isInTimeRange && isPending;
+    return isCurrent;
   }) || null;
 
-  console.log("📋 Current task trovato:", currentTask);
+  // Determina se il task corrente è in ritardo
+  const isCurrentTaskLate = currentTask ? (() => {
+    const now = new Date();
+    const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    const currentMinutes = timeToMinutes(currentTime);
+    const endMinutes = timeToMinutes(currentTask.endTime);
+    return currentMinutes > endMinutes;
+  })() : false;
+
+  const currentTaskDelayMinutes = isCurrentTaskLate && currentTask 
+    ? calculateDelayMinutes(currentTask.endTime) 
+    : 0;
+
+  console.log("📋 Current task trovato:", {
+    task: currentTask,
+    isLate: isCurrentTaskLate,
+    delayMinutes: currentTaskDelayMinutes
+  });
 
   // Confirm task mutation
   const confirmMutation = useMutation({
@@ -206,6 +244,52 @@ export default function Dashboard() {
       return;
     }
     confirmMutation.mutate(taskId);
+  };
+
+  // Confirm task with delay mutation
+  const confirmWithDelayMutation = useMutation({
+    mutationFn: async (data: { taskId: string; delayMinutes: number }) => {
+      console.log("🕰️ Tentativo di conferma task in ritardo:", data);
+      try {
+        // Prima registra il ritardo
+        const delayRes = await apiRequest("POST", `/api/tasks/${data.taskId}/delay`, {
+          taskId: data.taskId,
+          delayMinutes: data.delayMinutes,
+        });
+        await delayRes.json();
+
+        // Poi conferma il task
+        const confirmRes = await apiRequest("POST", `/api/tasks/${data.taskId}/confirm`, {
+          taskId: data.taskId,
+          confirmedAt: new Date().toISOString(),
+        });
+        return confirmRes.json();
+      } catch (error) {
+        console.error("❌ Errore nella conferma con ritardo:", error);
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/schedule/today"] });
+      // Reset processed delayed tasks since we manually handled this one
+      setProcessedDelayedTasks(prev => new Set(prev).add(currentTask?.id || ''));
+      toast({
+        title: "✅ Task Confermato in Ritardo",
+        description: `Il tuo arrivo in ritardo è stato registrato. Il programma è stato aggiornato.`,
+      });
+    },
+    onError: () => {
+      toast({
+        title: "❌ Errore",
+        description: "Impossibile confermare il task in ritardo. Riprova.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleConfirmWithDelay = (taskId: string, delayMinutes: number) => {
+    console.log("🕰️ handleConfirmWithDelay chiamato:", { taskId, delayMinutes });
+    confirmWithDelayMutation.mutate({ taskId, delayMinutes });
   };
 
   // Report delay mutation
@@ -340,9 +424,13 @@ export default function Dashboard() {
             <CurrentTaskCard
               task={currentTask}
               onConfirm={handleConfirm}
+              onConfirmWithDelay={handleConfirmWithDelay}
               onReportDelay={handleReportDelay}
               isConfirming={confirmMutation.isPending}
+              isConfirmingWithDelay={confirmWithDelayMutation.isPending}
               isReportingDelay={delayMutation.isPending}
+              isLate={isCurrentTaskLate}
+              delayMinutes={currentTaskDelayMinutes}
             />
 
             {/* Timeline */}

@@ -36,6 +36,7 @@ export default function Dashboard() {
   const confirmMutation = useMutation({
     mutationFn: async (taskId: string) => {
       const res = await apiRequest("POST", `/api/tasks/${taskId}/confirm`, {
+        taskId: taskId,
         confirmedAt: new Date().toISOString(),
       });
       return res.json();

@@ -98,39 +98,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Task not found" });
       }
 
-      // Update task status to delayed
+      // Update task status to delayed - NON modificare orari
       await storage.updateTask(id, {
         status: "delayed",
       });
 
-      // Get all tasks for this schedule
-      const tasks = await storage.getTasksForSchedule(task.scheduleId);
-      
-      // Find tasks that come after this one
-      const taskIndex = tasks.findIndex((t) => t.id === id);
-      const futureTasks = tasks.slice(taskIndex + 1);
-
-      // Update future tasks with delay
-      for (const futureTask of futureTasks) {
-        const [startH, startM] = futureTask.startTime.split(":").map(Number);
-        const [endH, endM] = futureTask.endTime.split(":").map(Number);
-        
-        const newStartMinutes = startH * 60 + startM + validation.data.delayMinutes;
-        const newEndMinutes = endH * 60 + endM + validation.data.delayMinutes;
-        
-        const newStartTime = `${Math.floor(newStartMinutes / 60).toString().padStart(2, "0")}:${(newStartMinutes % 60).toString().padStart(2, "0")}`;
-        const newEndTime = `${Math.floor(newEndMinutes / 60).toString().padStart(2, "0")}:${(newEndMinutes % 60).toString().padStart(2, "0")}`;
-        
-        await storage.updateTask(futureTask.id, {
-          startTime: newStartTime,
-          endTime: newEndTime,
-        });
-      }
-
       return res.json({
-        message: "Delay recorded and schedule updated",
+        message: "Delay recorded",
         delayMinutes: validation.data.delayMinutes,
-        affectedTasks: futureTasks.length,
+        taskId: id,
       });
     } catch (error) {
       console.error("Error reporting delay:", error);
@@ -163,11 +139,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let resettedTasks = 0;
       let confirmedTasks = 0;
 
-      // Reset all delayed tasks back to their original times and status
+      // Reset all delayed tasks back to pending status - NON rigenerare schedule
       for (const task of schedule.tasks) {
         if (task.status === "delayed") {
-          // For this demo, we'll reset to pending status
-          // In a real system, you'd restore original times from backup
+          // Cambia solo status da delayed a pending
           await storage.updateTask(task.id, {
             status: "pending",
           });
@@ -184,18 +159,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Regenerate the schedule to reset all times to original
-      if (resettedTasks > 0) {
-        // Delete current schedule and regenerate
-        await storage.deleteSchedule(schedule.id);
-        await generateDailySchedule(today, "Nathan");
-      }
-
+      // NON rigenerare schedule - mantieni orari originali
+      
       return res.json({
         message: "Delays reset successfully",
         resettedTasks,
         confirmedTasks,
-        scheduleRegenerated: resettedTasks > 0,
+        scheduleRegenerated: false,
       });
     } catch (error) {
       console.error("Error resetting delays:", error);

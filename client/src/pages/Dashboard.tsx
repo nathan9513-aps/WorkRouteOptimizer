@@ -153,11 +153,10 @@ export default function Dashboard() {
     
     // Calcola se il task è in ritardo
     const isLate = currentMinutes > endMinutes && task.status === "pending";
-    const delayMinutes = isLate ? calculateDelayMinutes(task.endTime) : 0;
     
     // Il task è "corrente" se:
     // 1. È nel suo orario normale E è pending
-    // 2. È in ritardo E è ancora pending (non ancora auto-processato)
+    // 2. È in ritardo E è ancora pending (non ancora auto-processato) E non è stato ancora confermato
     const isCurrent = (isInTimeRange && isPending) || (isLate && isPending);
     
     console.log("🕐 Controllo task:", {
@@ -173,30 +172,45 @@ export default function Dashboard() {
       isInTimeRange,
       isPending,
       isLate,
-      delayMinutes,
       isCurrent
     });
     
     return isCurrent;
   }) || null;
 
-  // Determina se il task corrente è in ritardo
-  const isCurrentTaskLate = currentTask ? (() => {
+  // Se non c'è un task corrente, trova il prossimo task futuro
+  const nextTask = !currentTask ? schedule?.tasks.find((task) => {
     const now = new Date();
     const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
     const currentMinutes = timeToMinutes(currentTime);
-    const endMinutes = timeToMinutes(currentTask.endTime);
+    const startMinutes = timeToMinutes(task.startTime);
+    
+    return task.status === "pending" && startMinutes > currentMinutes;
+  }) || null : null;
+
+  // Il task da mostrare è quello corrente o il prossimo
+  const displayTask = currentTask || nextTask;
+
+  // Determina se il task da mostrare è in ritardo
+  const isDisplayTaskLate = displayTask && currentTask ? (() => {
+    const now = new Date();
+    const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+    const currentMinutes = timeToMinutes(currentTime);
+    const endMinutes = timeToMinutes(displayTask.endTime);
     return currentMinutes > endMinutes;
   })() : false;
 
-  const currentTaskDelayMinutes = isCurrentTaskLate && currentTask 
-    ? calculateDelayMinutes(currentTask.endTime) 
+  const displayTaskDelayMinutes = isDisplayTaskLate && displayTask 
+    ? calculateDelayMinutes(displayTask.endTime) 
     : 0;
 
-  console.log("📋 Current task trovato:", {
-    task: currentTask,
-    isLate: isCurrentTaskLate,
-    delayMinutes: currentTaskDelayMinutes
+  console.log("📋 Display task info:", {
+    currentTask: currentTask?.id,
+    nextTask: nextTask?.id,
+    displayTask: displayTask?.id,
+    isDisplayTaskLate,
+    delayMinutes: displayTaskDelayMinutes,
+    taskType: currentTask ? 'current' : (nextTask ? 'next' : 'none')
   });
 
   // Confirm task mutation
@@ -422,21 +436,22 @@ export default function Dashboard() {
 
             {/* Current Task Card */}
             <CurrentTaskCard
-              task={currentTask}
+              task={displayTask}
               onConfirm={handleConfirm}
               onConfirmWithDelay={handleConfirmWithDelay}
               onReportDelay={handleReportDelay}
               isConfirming={confirmMutation.isPending}
               isConfirmingWithDelay={confirmWithDelayMutation.isPending}
               isReportingDelay={delayMutation.isPending}
-              isLate={isCurrentTaskLate}
-              delayMinutes={currentTaskDelayMinutes}
+              isLate={isDisplayTaskLate}
+              delayMinutes={displayTaskDelayMinutes}
+              isNextTask={!!nextTask && !currentTask}
             />
 
             {/* Timeline */}
             <Timeline
               tasks={schedule?.tasks || []}
-              currentTaskId={currentTask?.id}
+              currentTaskId={displayTask?.id}
             />
           </div>
 

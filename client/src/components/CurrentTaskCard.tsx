@@ -16,6 +16,7 @@ interface CurrentTaskCardProps {
   isReportingDelay?: boolean;
   isLate?: boolean;
   delayMinutes?: number;
+  isNextTask?: boolean;
 }
 
 export function CurrentTaskCard({ 
@@ -27,7 +28,8 @@ export function CurrentTaskCard({
   isConfirmingWithDelay,
   isReportingDelay,
   isLate = false,
-  delayMinutes = 0
+  delayMinutes = 0,
+  isNextTask = false
 }: CurrentTaskCardProps) {
   if (!task) {
     return (
@@ -73,6 +75,7 @@ export function CurrentTaskCard({
             <div>
               <div className="text-sm text-muted-foreground uppercase tracking-wide font-medium mb-1">
                 {isBreak ? "Pausa" : isTravel ? "Spostamento" : "Lavoro"}
+                {isNextTask && " - Prossimo Task"}
               </div>
               <h2 className="text-3xl font-semibold">
                 {task.location?.name || task.description || "Task"}
